@@ -8,13 +8,13 @@ use matrix_sdk::ruma::OwnedUserId;
 use sqlx::PgPool;
 use tracing::info;
 
-use homelab_bot::commands;
-use homelab_bot::config;
-use homelab_bot::db;
-use homelab_bot::matrix;
-use homelab_bot::seerr_client::SeerrClient;
-use homelab_bot::webhook;
-use homelab_bot::AppState;
+use michel_bot::commands;
+use michel_bot::config;
+use michel_bot::db;
+use michel_bot::matrix;
+use michel_bot::seerr_client::SeerrClient;
+use michel_bot::webhook;
+use michel_bot::AppState;
 
 #[tokio::main]
 async fn main() -> Result<()> {

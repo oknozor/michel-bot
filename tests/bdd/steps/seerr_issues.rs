@@ -82,7 +82,7 @@ async fn the_bot_is_started(world: &mut TestWorld, room_alias: String) {
 
     let homeserver_url = format!("http://localhost:{synapse_port}");
     let database_url = format!(
-        "postgres://testuser:testpass@localhost:{postgres_port}/homelab_bot_test"
+        "postgres://testuser:testpass@localhost:{postgres_port}/michel_bot_test"
     );
     let listen_addr = format!("127.0.0.1:{webhook_port}");
     let admin_user_id = format!("@{ADMIN_USERNAME}:localhost");
@@ -92,7 +92,7 @@ async fn the_bot_is_started(world: &mut TestWorld, room_alias: String) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
 
     let handle = tokio::spawn(async move {
-        let config = homelab_bot::config::Config {
+        let config = michel_bot::config::Config {
             matrix_homeserver_url: homeserver_url,
             matrix_user_id: bot_username.to_string(),
             matrix_password: BOT_PASSWORD.to_string(),
@@ -111,12 +111,12 @@ async fn the_bot_is_started(world: &mut TestWorld, room_alias: String) {
                 return;
             }
         };
-        if let Err(e) = homelab_bot::db::run_migrations(&pool).await {
+        if let Err(e) = michel_bot::db::run_migrations(&pool).await {
             let _ = ready_tx.send(Err(format!("Failed to run migrations: {e}")));
             return;
         }
 
-        let client = match homelab_bot::matrix::create_and_login(
+        let client = match michel_bot::matrix::create_and_login(
             &config.matrix_homeserver_url,
             &config.matrix_user_id,
             &config.matrix_password,
@@ -130,7 +130,7 @@ async fn the_bot_is_started(world: &mut TestWorld, room_alias: String) {
             }
         };
 
-        let (room, _room_id) = match homelab_bot::matrix::join_room(&client, &config.matrix_room_alias).await {
+        let (room, _room_id) = match michel_bot::matrix::join_room(&client, &config.matrix_room_alias).await {
             Ok(r) => r,
             Err(e) => {
                 let _ = ready_tx.send(Err(format!("Failed to join room: {e}")));
@@ -139,7 +139,7 @@ async fn the_bot_is_started(world: &mut TestWorld, room_alias: String) {
         };
 
         let seerr_client =
-            homelab_bot::seerr_client::SeerrClient::new(&config.seerr_api_url, &config.seerr_api_key);
+            michel_bot::seerr_client::SeerrClient::new(&config.seerr_api_url, &config.seerr_api_key);
 
         let admin_users: Vec<matrix_sdk::ruma::OwnedUserId> = config
             .matrix_admin_users
@@ -147,21 +147,21 @@ async fn the_bot_is_started(world: &mut TestWorld, room_alias: String) {
             .filter_map(|u| matrix_sdk::ruma::OwnedUserId::try_from(u.as_str()).ok())
             .collect();
 
-        let cmd_ctx = std::sync::Arc::new(homelab_bot::commands::CommandContext {
+        let cmd_ctx = std::sync::Arc::new(michel_bot::commands::CommandContext {
             db: pool.clone(),
             seerr_client,
             admin_users,
         });
 
         client.add_event_handler_context(cmd_ctx);
-        client.add_event_handler(homelab_bot::commands::on_room_message);
+        client.add_event_handler(michel_bot::commands::on_room_message);
 
-        let state = std::sync::Arc::new(homelab_bot::AppState { room, db: pool });
+        let state = std::sync::Arc::new(michel_bot::AppState { room, db: pool });
 
         let app = axum::Router::new()
             .route(
                 "/webhook/seerr",
-                axum::routing::post(homelab_bot::webhook::handle_seerr_webhook),
+                axum::routing::post(michel_bot::webhook::handle_seerr_webhook),
             )
             .with_state(state);
 

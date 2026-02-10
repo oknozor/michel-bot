@@ -79,12 +79,12 @@ pub async fn get_shared_infra() -> &'static SharedInfra {
 
             // Run migrations once upfront to avoid races between bots
             let database_url = format!(
-                "postgres://testuser:testpass@localhost:{postgres_port}/homelab_bot_test"
+                "postgres://testuser:testpass@localhost:{postgres_port}/michel_bot_test"
             );
             let pool = sqlx::PgPool::connect(&database_url)
                 .await
                 .expect("Failed to connect to Postgres for migrations");
-            homelab_bot::db::run_migrations(&pool)
+            michel_bot::db::run_migrations(&pool)
                 .await
                 .expect("Failed to run migrations");
             pool.close().await;
@@ -236,7 +236,7 @@ root:
 
 pub async fn start_postgres() -> (ContainerAsync<Postgres>, u16) {
     let container = Postgres::default()
-        .with_db_name("homelab_bot_test")
+        .with_db_name("michel_bot_test")
         .with_user("testuser")
         .with_password("testpass")
         .start()

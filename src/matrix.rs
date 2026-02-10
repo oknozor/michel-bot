@@ -17,7 +17,7 @@ pub async fn create_and_login(
     client
         .matrix_auth()
         .login_username(user_id, password)
-        .initial_device_display_name("homelab-bot")
+        .initial_device_display_name("michel-bot")
         .send()
         .await
         .context("Failed to login to Matrix")?;
