@@ -7,6 +7,9 @@ pub struct Config {
     pub matrix_room_alias: String,
     pub database_url: String,
     pub webhook_listen_addr: String,
+    pub seerr_api_url: String,
+    pub seerr_api_key: String,
+    pub matrix_admin_users: Vec<String>,
 }
 
 impl Config {
@@ -24,6 +27,16 @@ impl Config {
                 .context("DATABASE_URL must be set")?,
             webhook_listen_addr: std::env::var("WEBHOOK_LISTEN_ADDR")
                 .unwrap_or_else(|_| "0.0.0.0:8080".to_string()),
+            seerr_api_url: std::env::var("SEERR_API_URL")
+                .context("SEERR_API_URL must be set")?,
+            seerr_api_key: std::env::var("SEERR_API_KEY")
+                .context("SEERR_API_KEY must be set")?,
+            matrix_admin_users: std::env::var("MATRIX_ADMIN_USERS")
+                .unwrap_or_default()
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
         })
     }
 }

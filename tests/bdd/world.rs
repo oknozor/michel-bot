@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use cucumber::World;
 use testcontainers::core::{ContainerAsync, ContainerPort, WaitFor};
@@ -6,6 +7,7 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::GenericImage;
 use testcontainers::ImageExt;
 use testcontainers_modules::postgres::Postgres;
+use wiremock::MockServer;
 
 pub const SYNAPSE_PORT: u16 = 8008;
 pub const SHARED_SECRET: &str = "test-secret-key";
@@ -13,6 +15,8 @@ pub const BOT_USERNAME: &str = "bot";
 pub const BOT_PASSWORD: &str = "bot_password";
 pub const OBSERVER_USERNAME: &str = "observer";
 pub const OBSERVER_PASSWORD: &str = "observer_password";
+pub const ADMIN_USERNAME: &str = "issueadmin";
+pub const ADMIN_PASSWORD: &str = "issueadmin_password";
 
 #[derive(Debug, World)]
 #[world(init = Self::new)]
@@ -28,6 +32,8 @@ pub struct TestWorld {
     pub room_id: String,
     pub last_root_event_id: String,
     pub last_thread_event_id: String,
+    pub seerr_mock: Option<Arc<MockServer>>,
+    pub issue_admin_access_token: String,
 }
 
 impl TestWorld {
@@ -44,6 +50,8 @@ impl TestWorld {
             room_id: String::new(),
             last_root_event_id: String::new(),
             last_thread_event_id: String::new(),
+            seerr_mock: None,
+            issue_admin_access_token: String::new(),
         })
     }
 }

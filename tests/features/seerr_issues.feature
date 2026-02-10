@@ -51,6 +51,22 @@ Feature: Seerr issue management via Matrix
     Then a threaded reply appears on the original message containing "Looking into the problem"
     And the threaded reply contains "admin"
 
+  Scenario: Admin resolves issue via Matrix command
+    Given a running Matrix homeserver
+    And a running PostgreSQL database
+    And a room "#support_hoohoot" exists
+    And the bot is started and connected to Matrix
+    And Seerr sends an "ISSUE_CREATED" webhook with:
+      | issue_id    | 50                     |
+      | subject     | Broken subtitles       |
+      | message     | Subs out of sync       |
+      | reported_by | alice                  |
+    And a message appears in "#support_hoohoot" containing "Broken subtitles"
+    When the admin sends '!issues resolve "Subtitles fixed"' as a thread reply
+    Then Seerr received a comment "Subtitles fixed" for issue 50
+    And Seerr received a resolve request for issue 50
+    And a threaded reply appears on the original message containing "resolved"
+
   Scenario: Reopening an issue removes the reaction and posts in the thread
     Given a running Matrix homeserver
     And a running PostgreSQL database

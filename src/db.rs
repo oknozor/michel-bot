@@ -68,3 +68,22 @@ pub async fn clear_reaction_event_id(pool: &PgPool, issue_id: i64) -> Result<()>
         .await?;
     Ok(())
 }
+
+pub async fn get_issue_event_by_matrix_event_id(
+    pool: &PgPool,
+    matrix_event_id: &str,
+) -> Result<Option<IssueEvent>> {
+    let row = sqlx::query_as::<_, (i64, String, String, Option<String>)>(
+        "SELECT issue_id, matrix_event_id, matrix_room_id, reaction_event_id FROM issue_events WHERE matrix_event_id = $1",
+    )
+    .bind(matrix_event_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|(issue_id, matrix_event_id, matrix_room_id, reaction_event_id)| IssueEvent {
+        issue_id,
+        matrix_event_id,
+        matrix_room_id,
+        reaction_event_id,
+    }))
+}

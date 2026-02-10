@@ -1,8 +1,13 @@
+use std::sync::Arc;
+
 use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
+use wiremock::matchers::{method, path_regex};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::world::{
-    self, TestWorld, BOT_PASSWORD, BOT_USERNAME, OBSERVER_PASSWORD, OBSERVER_USERNAME,
+    self, TestWorld, ADMIN_PASSWORD, ADMIN_USERNAME, BOT_PASSWORD, BOT_USERNAME,
+    OBSERVER_PASSWORD, OBSERVER_USERNAME,
 };
 
 fn http_client() -> reqwest::Client {
@@ -51,6 +56,16 @@ async fn a_running_matrix_homeserver(world: &mut TestWorld) {
         false,
     )
     .await;
+
+    // Register issue admin user (for command tests)
+    world.issue_admin_access_token = world::register_user_via_shared_secret(
+        &http,
+        world.synapse_port,
+        ADMIN_USERNAME,
+        ADMIN_PASSWORD,
+        false,
+    )
+    .await;
 }
 
 #[given("a running PostgreSQL database")]
@@ -81,11 +96,32 @@ async fn the_bot_is_started(world: &mut TestWorld) {
 
     world.webhook_port = webhook_port;
 
+    // Start wiremock server for Seerr API
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/api/v1/issue/\d+/comment"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0..)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/api/v1/issue/\d+/resolved"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0..)
+        .mount(&mock_server)
+        .await;
+
+    let seerr_api_url = mock_server.uri();
+    world.seerr_mock = Some(Arc::new(mock_server));
+
     let homeserver_url = format!("http://localhost:{synapse_port}");
     let database_url = format!(
         "postgres://testuser:testpass@localhost:{postgres_port}/homelab_bot_test"
     );
     let listen_addr = format!("127.0.0.1:{webhook_port}");
+    let admin_user_id = format!("@{ADMIN_USERNAME}:localhost");
 
     let handle = tokio::spawn(async move {
         let config = homelab_bot::config::Config {
@@ -95,6 +131,9 @@ async fn the_bot_is_started(world: &mut TestWorld) {
             matrix_room_alias: "#support_hoohoot:localhost".to_string(),
             database_url,
             webhook_listen_addr: listen_addr,
+            seerr_api_url,
+            seerr_api_key: "test-api-key".to_string(),
+            matrix_admin_users: vec![admin_user_id],
         };
 
         let pool = sqlx::PgPool::connect(&config.database_url)
@@ -116,6 +155,24 @@ async fn the_bot_is_started(world: &mut TestWorld) {
             .await
             .expect("Failed to join room");
 
+        let seerr_client =
+            homelab_bot::seerr_client::SeerrClient::new(&config.seerr_api_url, &config.seerr_api_key);
+
+        let admin_users: Vec<matrix_sdk::ruma::OwnedUserId> = config
+            .matrix_admin_users
+            .iter()
+            .filter_map(|u| matrix_sdk::ruma::OwnedUserId::try_from(u.as_str()).ok())
+            .collect();
+
+        let cmd_ctx = std::sync::Arc::new(homelab_bot::commands::CommandContext {
+            db: pool.clone(),
+            seerr_client,
+            admin_users,
+        });
+
+        client.add_event_handler_context(cmd_ctx);
+        client.add_event_handler(homelab_bot::commands::on_room_message);
+
         let state = std::sync::Arc::new(homelab_bot::AppState { room, db: pool });
 
         let app = axum::Router::new()
@@ -129,7 +186,13 @@ async fn the_bot_is_started(world: &mut TestWorld) {
             .await
             .expect("Failed to bind");
 
-        axum::serve(listener, app).await.expect("Server error");
+        let sync_client = client.clone();
+        tokio::select! {
+            result = axum::serve(listener, app) => {
+                result.expect("Server error");
+            }
+            _ = sync_client.sync(matrix_sdk::config::SyncSettings::default()) => {}
+        }
     });
 
     world.bot_handle = Some(handle);
@@ -150,13 +213,14 @@ async fn a_room_exists(world: &mut TestWorld, room_alias: String) {
 
     let bot_user_id = format!("@{BOT_USERNAME}:localhost");
     let observer_user_id = format!("@{OBSERVER_USERNAME}:localhost");
+    let issue_admin_user_id = format!("@{ADMIN_USERNAME}:localhost");
 
     world.room_id = world::create_room(
         &http,
         world.synapse_port,
         &world.admin_access_token,
         local_part,
-        &[&bot_user_id, &observer_user_id],
+        &[&bot_user_id, &observer_user_id, &issue_admin_user_id],
     )
     .await;
 
@@ -172,6 +236,21 @@ async fn a_room_exists(world: &mut TestWorld, room_alias: String) {
         .send()
         .await
         .expect("Observer failed to join room")
+        .json()
+        .await
+        .expect("Failed to parse join response");
+
+    // Issue admin also joins
+    let _: serde_json::Value = http
+        .post(format!(
+            "http://localhost:{}/_matrix/client/v3/join/{}",
+            world.synapse_port, world.room_id
+        ))
+        .bearer_auth(&world.issue_admin_access_token)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .expect("Issue admin failed to join room")
         .json()
         .await
         .expect("Failed to parse join response");
@@ -398,5 +477,91 @@ async fn no_longer_has_reaction(world: &mut TestWorld, emoji: String) {
     assert!(
         !found,
         "'{emoji}' reaction still exists on the original message"
+    );
+}
+
+// -- Admin command steps --
+
+#[when(regex = r#"^the admin sends '([^']*)' as a thread reply$"#)]
+async fn admin_sends_thread_reply(world: &mut TestWorld, command: String) {
+    let http = http_client();
+    let root_event_id = &world.last_root_event_id;
+
+    let body = serde_json::json!({
+        "msgtype": "m.text",
+        "body": command,
+        "m.relates_to": {
+            "rel_type": "m.thread",
+            "event_id": root_event_id,
+            "m.in_reply_to": {
+                "event_id": root_event_id,
+            },
+            "is_falling_back": true,
+        },
+    });
+
+    let resp: serde_json::Value = http
+        .put(format!(
+            "http://localhost:{}/_matrix/client/v3/rooms/{}/send/m.room.message/{}",
+            world.synapse_port,
+            world.room_id,
+            format!("txn-admin-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()),
+        ))
+        .bearer_auth(&world.issue_admin_access_token)
+        .json(&body)
+        .send()
+        .await
+        .expect("Failed to send admin thread reply")
+        .json()
+        .await
+        .expect("Failed to parse send response");
+
+    assert!(
+        resp["event_id"].as_str().is_some(),
+        "Failed to send admin command: {resp:?}"
+    );
+
+    // Give the bot time to process the command via sync
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+}
+
+#[then(regex = r#"^Seerr received a comment "([^"]*)" for issue (\d+)$"#)]
+async fn seerr_received_comment(world: &mut TestWorld, comment: String, issue_id: u64) {
+    let mock_server = world.seerr_mock.as_ref().expect("Wiremock not started");
+
+    let received = mock_server.received_requests().await.expect("No requests recorded");
+    let expected_path = format!("/api/v1/issue/{}/comment", issue_id);
+
+    let found = received.iter().any(|req| {
+        if req.url.path() != expected_path {
+            return false;
+        }
+        if let Ok(body) = serde_json::from_slice::<serde_json::Value>(&req.body) {
+            body["message"].as_str() == Some(comment.as_str())
+        } else {
+            false
+        }
+    });
+
+    assert!(
+        found,
+        "Seerr did not receive comment '{comment}' for issue {issue_id}. Received requests: {:?}",
+        received.iter().map(|r| format!("{} {}", r.method, r.url.path())).collect::<Vec<_>>()
+    );
+}
+
+#[then(regex = r#"^Seerr received a resolve request for issue (\d+)$"#)]
+async fn seerr_received_resolve(world: &mut TestWorld, issue_id: u64) {
+    let mock_server = world.seerr_mock.as_ref().expect("Wiremock not started");
+
+    let received = mock_server.received_requests().await.expect("No requests recorded");
+    let expected_path = format!("/api/v1/issue/{}/resolved", issue_id);
+
+    let found = received.iter().any(|req| req.url.path() == expected_path);
+
+    assert!(
+        found,
+        "Seerr did not receive resolve request for issue {issue_id}. Received requests: {:?}",
+        received.iter().map(|r| format!("{} {}", r.method, r.url.path())).collect::<Vec<_>>()
     );
 }
