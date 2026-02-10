@@ -16,9 +16,9 @@ anyhow = "1"
 reqwest = { version = "0.12", features = ["json"] }
 
 [dev-dependencies]
-cucumber = "0.21"
-testcontainers = "0.23"
-testcontainers-modules = { version = "0.11", features = ["postgres"] }
+cucumber = { version = "0.22", features = ["libtest"] }
+testcontainers = "0.26"
+testcontainers-modules = { version = "0.14", features = ["postgres"] }
 hmac = "0.12"
 sha1 = "0.10"
 hex = "0.4"

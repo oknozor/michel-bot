@@ -61,6 +61,14 @@ Integration tests (requires Docker for testcontainers):
 cargo test --test bdd
 ```
 
+**Jetbrains:**
+
+To run cucumber tests via JetBrains IDEs command, you will need tu use the nightly compiler (see: https://intellij-rust.github.io/docs/faq.html#how-to-run-e2e-tests). 
+
+```shell
+rustup default nighly
+```
+
 ## Webhook endpoints
 
 `POST /webhook/seerr` — receives Seerr webhook payloads.

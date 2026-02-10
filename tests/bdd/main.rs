@@ -3,10 +3,15 @@
 mod steps;
 mod world;
 
-use cucumber::World;
+use crate::world::TestWorld;
+use cucumber::{World, writer};
 
 #[tokio::main]
 async fn main() {
-    world::TestWorld::run("tests/features").await;
+    TestWorld::cucumber()
+        .with_writer(writer::Libtest::or_basic())
+        .run("tests/features")
+        .await;
+
     world::stop_shared_infra().await;
 }
